@@ -1,0 +1,5 @@
+{
+  "name": "AlgoInstructor",
+  "description": "AI-powered Algorithm and Data Structure Tutor utilizing Gemini 2.5 Flash for rapid, interactive coding lessons.",
+  "requestFramePermissions": []
+}

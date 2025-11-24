@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, Chat, GenerateContentResponse } from "@google/genai";
+import { GoogleGenerativeAI, ChatSession } from "@google/generative-ai";
 import { ALGO_TOPICS, Message, Role, Topic } from './types';
 
 // --- Markdown/Code Renderer Component ---
@@ -57,7 +57,7 @@ export default function App() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null);
-  const [chatSession, setChatSession] = useState<Chat | null>(null);
+  const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   const [isApiKeyMissing, setIsApiKeyMissing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -65,35 +65,37 @@ export default function App() {
   // Initialize Chat Session
   const initChat = async (topic?: Topic) => {
     try {
-      if (!process.env.API_KEY) {
+      const apiKey = import.meta.env.VITE_API_KEY;
+      if (!apiKey) {
         setIsApiKeyMissing(true);
         return;
       }
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      
+      const genAI = new GoogleGenerativeAI(apiKey);
+
       const systemInstruction = `
         당신은 '알고선생(AlgoSensei)'이라는 이름의 친절하고 유능한 알고리즘 튜터입니다.
         사용자가 알고리즘 및 자료구조를 쉽게 이해할 수 있도록 도와주세요.
-        
+
         [규칙]
         1. **모든 코드 예제는 반드시 Python으로 제공하세요.**
         2. 설명은 한국어로 명확하고 이해하기 쉽게 작성하세요.
         3. 코드를 제공할 때는 항상 **시간 복잡도(Time Complexity)**와 **공간 복잡도(Space Complexity)** 분석을 포함하세요.
         4. 처음에는 개념을 설명하고, 사용자가 이해했는지 확인한 후 예제 코드를 보여주는 방식(소크라테스식 문답법)을 선호하세요.
         5. 사용자가 틀린 답을 말하면 부드럽게 교정해주고, 올바른 방향으로 유도하세요.
-        
+
         ${topic ? `현재 학습 주제는 '${topic.title}'입니다. 이 주제에 집중해서 설명해 주세요.` : ''}
       `;
 
-      const newChat = ai.chats.create({
-        model: 'gemini-2.5-flash',
-        config: {
-          systemInstruction: systemInstruction,
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-1.5-flash',
+        systemInstruction: systemInstruction,
+        generationConfig: {
           temperature: 0.7,
         },
       });
 
+      const newChat = model.startChat();
       setChatSession(newChat);
       setMessages([]); // Clear history on new topic
 
@@ -101,17 +103,17 @@ export default function App() {
       if (topic) {
         setIsLoading(true);
         const prompt = `안녕하세요! 저는 오늘 '${topic.title}'에 대해 배우고 싶습니다. ${topic.prompt}`;
-        
+
         try {
-          const responseStream = await newChat.sendMessageStream({ message: prompt });
-          
+          const result = await newChat.sendMessageStream(prompt);
+
           let fullText = "";
           const msgId = Date.now().toString();
-          
+
           setMessages([{ id: msgId, role: Role.MODEL, text: "", isStreaming: true }]);
 
-          for await (const chunk of responseStream) {
-            const chunkText = (chunk as GenerateContentResponse).text;
+          for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
             if (chunkText) {
               fullText += chunkText;
               setMessages(prev => {
@@ -124,7 +126,7 @@ export default function App() {
               });
             }
           }
-          
+
           setMessages(prev => prev.map(m => m.id === msgId ? { ...m, isStreaming: false } : m));
 
         } catch (e) {
@@ -149,7 +151,7 @@ export default function App() {
 
   useEffect(() => {
     // Check API Key immediately
-    if (!process.env.API_KEY) {
+    if (!import.meta.env.VITE_API_KEY) {
       setIsApiKeyMissing(true);
     } else {
       initChat();
@@ -178,15 +180,15 @@ export default function App() {
     setMessages(prev => [...prev, { id: userMsgId, role: Role.USER, text: userMsgText }]);
 
     try {
-      const responseStream = await chatSession.sendMessageStream({ message: userMsgText });
-      
+      const result = await chatSession.sendMessageStream(userMsgText);
+
       const aiMsgId = (Date.now() + 1).toString();
       setMessages(prev => [...prev, { id: aiMsgId, role: Role.MODEL, text: "", isStreaming: true }]);
-      
+
       let fullText = "";
 
-      for await (const chunk of responseStream) {
-        const chunkText = (chunk as GenerateContentResponse).text;
+      for await (const chunk of result.stream) {
+        const chunkText = chunk.text();
         if (chunkText) {
           fullText += chunkText;
           setMessages(prev => {
